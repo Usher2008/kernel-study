@@ -238,7 +238,7 @@ NTSTATUS MyFileInforAppendNode(
 	PLARGE_INTEGER file_length)
 {
     PMY_FILE_INFOR my_file_infor =
-        (PMY_FILE_INFOR)ExAkkicatePoolWithTag(
+        (PMY_FILE_INFOR)ExAllocatePoolWithTag(
     		PagedPool, sizeof(MY_FILE_INFOR), MEM_TAG);
     if(my_file_infor == NULL)
         return STATUS_INSUFFICIENT_RESOURES;
@@ -278,3 +278,106 @@ CONTAINING_RECORD 是一个已定义的宏，作用是通过一个 LIST_ENTRY �
 
 ## LARGE_INTEGER
 
+驱动中经常使用这个结构体来代替 long long 长度的变量，定义如下
+
+```c
+typedef union _LARGE_INTEGER{
+    struct {
+        ULONG LowPart;
+        LONG HighPart;
+    };
+    struct {
+        ULONG LowPart;
+        LONG HighPart;
+    }u;
+    LONGLONG QuadPard;
+} LARGE_INTEGER;
+```
+
+简单的利用如下：
+
+```c
+LARGE_INTEGER a, b;
+a.QuadPard = 100;
+a.QuadPard *= 100;
+b.QuadPard = a.QuadPard;
+
+KdPrint("LowPart = %x HighPart = %x", b.u.LowPart, b.HighPart);
+```
+
+
+
+# Spin lock
+
+## use lock
+
+驱动程序中也有锁来保证函数的线程安全，如下代码初始化获取一个自旋锁
+
+```c
+KSPIN_LOCK my_spin_lock;
+KeInitializeSpinLock(&my_spin_lock);
+```
+
+KeAcquireSpinLock 和 KeReleseSpinLock 之间的代码是只有单线程执行的，但是由于会提高当前中断级，所以使用一个变量来保存之前的中断级
+
+```c
+KIRQL irql;
+KeAcquireSpinLock(&my_spin_lock, &irql);
+//do something
+KeReleseSpinLock(&my_spin_lock, &irql);
+```
+
+值得注意的是，锁变量应该是静态或是全局的，否则锁将毫无意义
+
+
+
+## ExInterlockedInsertHeadList
+
+链表是一个很好的使用锁的例子，LIST_ENTRY 本身并不保证多线程安全性，不过 LIST_ENTRY 有一系列操作，只需要为每个链表定义并初始化一个锁即可使用
+
+```c
+LIST_ENTRY my_list_head;
+KSPIN_LOCK my_list_lock;
+
+void MyFileInforInilt()
+{
+    InitializeListHead(&my_list_head);
+    KeInitializeSpinlock(&my_list_lock);
+}
+```
+
+插入节点普通的操作代码如下
+
+```c
+InsertHeadList(&my_list_head, (PLIST_ENTRY)& my_file_infor);
+my_file_infor = RemoveHeadList(&my_list_head);
+```
+
+加锁的操作方式如下
+
+```c
+ExInterlockedInsertHeadList(&my_list_head, (PLIST_ENTRY)& my_file_infor, &my_list_lock);
+my_file_infor = ExInterlockedRemoveHeadList(&my_list_head, &my_list_lock);
+```
+
+相比之下增加了一个自旋锁类型的指针作为参数
+
+
+
+## KeAcquireInStackQueuedSpinLock
+
+除了普通的自旋锁之外，还有一种队列自旋锁，这种自旋锁在多 CPU 的平台上有更高的性能表现，并且遵守“谁先等待，谁先获取自旋锁”的原则
+
+使用方式基本一样，如下：
+
+```c
+KSPIN_LOCK my_Queue_Spinlock;
+KeInitializeSpinlock(&my_Queue_Spinlock);
+
+KLOCK_QUEUE_HANDLE my_lock_queue_handle;
+KeAcquireInStackQueuedSpinLock(&my_Queue_Spinlock, &my_lock_queue_handle);
+//do something
+KeReleseInStackQueuedSpinLock(&my_lock_queue_handle);
+```
+
+值得注意的是，一个自旋锁要么按照普通原子锁方式来使用，要么按照列队自旋锁方式来使用
