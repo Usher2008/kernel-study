@@ -2,7 +2,7 @@
 
 ## string struct
 
-//传统C语言定义和使用字符串
+传统C语言定义和使用字符串
 
 ```c
 char *str = {"my first string"};                //ANSI字符串
@@ -12,7 +12,7 @@ size_t wlen = wcslen(wstr);                     //Unicode字符串求长度
 printf("%s %ws %d %d", str, wstr, len, wlan);   //打印两种字符串
 ```
 
-//驱动开发定义以下结构
+驱动开发定义以下结构
 
 ```c
 typedef struct _UNICODE_STRING{
@@ -28,8 +28,7 @@ typedef struct _STRING{
 } ANSI_STRING, *PUNICODE_STRING;
 ```
 
-//UNICODE_STRING 并不保证 Buffer 指向的字符串始终以空结束
-//所以下列做法是错误的
+UNICODE_STRING 并不保证 Buffer 指向的字符串始终以空结束，所以下列做法是错误的
 
 ```c
 UNICODE_STRING str;
@@ -40,7 +39,7 @@ DbgPrint("%ws", str.Buffer);
 
 ## init string
 
-//错误示范
+错误示范
 
 ```c
 UNICODE_STRING str = {0};
@@ -50,7 +49,7 @@ str.Length = str.MaximumLength =
 wcslen(L"my first string!") * sizeof(WCHAR);
 ```
 
-//正确做法
+正确做法
 
 ```c
 UNICODE_STRING str = {0};
@@ -61,7 +60,7 @@ str.Length = str.MaximumLength =
 wcslen(L"my first string!") * sizeof(WCHAR);
 ```
 
-//另一种正确做法
+另一种正确做法
 ```c
 UNICODE_STRING str;
 str.Buffer = L"my first string!";
@@ -69,7 +68,7 @@ str.Length = str.MaximumLength =
 wcslen(L"my first string!") * sizeof(WCHAR);
 ```
 
-//初始化可以使用API
+初始化可以使用API
 
 ```c
 VOID RtlInitUnicodeString(
@@ -78,7 +77,7 @@ IN PCWSTR SourceString
 );
 ```
 
-//例子
+例子
 
 ```c
 UNICODE_STRING str = {0};
@@ -87,7 +86,7 @@ RtlInitUnicodeString(&str, L"my first string!");
 
 ## copying string
 
-//例子
+例子
 
 ```c
 UNICODE_STRING dst;//目标字符串
@@ -233,13 +232,13 @@ typedef struct{
 //FILE_OBJECT 与 LARGE_INTEGER 后文再介绍
 
 NTSTATUS MyFileInforAppendNode(
-	PFILE_OBJECT file_object,
-	PUNICODE_STRING file_name,
-	PLARGE_INTEGER file_length)
+    PFILE_OBJECT file_object,
+    PUNICODE_STRING file_name,
+    PLARGE_INTEGER file_length)
 {
     PMY_FILE_INFOR my_file_infor =
         (PMY_FILE_INFOR)ExAllocatePoolWithTag(
-    		PagedPool, sizeof(MY_FILE_INFOR), MEM_TAG);
+            PagedPool, sizeof(MY_FILE_INFOR), MEM_TAG);
     if(my_file_infor == NULL)
         return STATUS_INSUFFICIENT_RESOURES;
     
@@ -268,8 +267,8 @@ CONTAINING_RECORD 是一个已定义的宏，作用是通过一个 LIST_ENTRY �
 
 ```c
 #define CONTAINING_RECORD(address, type, field)((type *)(\
-	(PCHAR)(address) - \
-	(ULONG_PTR)(&((type *)0)->field)))
+    (PCHAR)(address) - \
+    (ULONG_PTR)(&((type *)0)->field)))
 ```
 
 从上面代码可以看出：LIST_ENTRY 中的数据成员 Flink 指向下一个 LIST_ENTRY。整个链表中的最后一个 LIST_ENTRY 的 Flink 不为空，而是指向头节点。得到 LIST_ENTRY 之后，要用 CONTAINING_RECORD 来得到链表节点中的数据。
