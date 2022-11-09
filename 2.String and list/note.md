@@ -127,7 +127,7 @@ status = RtlAppendUnicodeToString(&dst, L"my second string!");
 c语言中经常使用 sprintf 用来将字符串与数字结合起来，宽字符版本为swprintf。虽然在驱动开发中依然可以使用，但不安全，微软建议使用 RtlSringCbPrintfW 来代替它
 
 ```c
-include <ntstrsafe.h>
+#include <ntstrsafe.h>
 //需要连接库ntsafestr.lib
 
 WCHAR dst_buf[512] = {0};
