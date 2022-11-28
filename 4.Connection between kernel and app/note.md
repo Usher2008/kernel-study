@@ -121,7 +121,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING reg_path)
 
 void cwkUnload(PDRIVER_OBJECT driver)
 {
-    UNICODE_STRING cdo_syb = RTL_CONSTANT_NAME(CWK_CDO_SYB_NAME);
+    UNICODE_STRING cdo_syb = RTL_CONSTANT_STRING(CWK_CDO_SYB_NAME);
     ASSERT(g_cdo != NULL);
     IoDeleteSymbolicLink(&cdo_syb);
     IoDeleteDevice(g_cdo);
@@ -140,7 +140,7 @@ void cwkUnload(PDRIVER_OBJECT driver)
 
 ```c
 NTSTATUS cwsDispatch(
-    IN PEDVICE_OBJECT dev,
+    IN PDEVICE_OBJECT dev,
     IN PIRP irp
 );
 ```
@@ -215,3 +215,139 @@ NTSTATUS cwkDispatch(
 
 # In App
 
+## CreateFile
+
+​    应用程序中打开设备和打开文件没有什么不同，除了路径有点特殊之外。
+
+```c
+#define CWK_DEV_SYM L"\\\\.\\slbkcdo_3948d33e"
+
+int main()
+{
+    HANDLE device = NULL;
+    ///...
+    device = CreateFile(CWK_DEV_SYM, GENERIC_READ |GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_SYSTEM, 0);
+    if(device == INVALID_HANDLE_VALUE)
+    {
+        printf("Open device failed.\r\n");
+        return -1;
+    }
+    else
+        printf("Open device successfully.\r\n");
+    ///...
+}
+```
+
+​    关闭设备非常简单，调用 CloseHandle 即可
+
+```c
+CloseHandle(device);
+```
+
+##  DeviceIoControl
+
+​    设备控制请求可以用来输入或是输出，但是需要“功能号”，下面定义了一个发送字符串的功能号
+
+```c
+#define CWK_DVC_SEND_STR (ULONG)CTL_CODE(FILE_DEVICE_UNKNOWN, 0x911, METHOD_BUFFERED, FILE_WRITE_DATA)
+```
+
+​    这里的 CTL_CODE 是一个宏，是 SDK 里的头文件提供的。要做的是直接利用这个宏来生成一个自己的设备控制请求功能号。CTL_CODE 有4个参数。
+
+​    其中第一个参数是设备类型。由于生成的这种控制设备和任何硬件都没有关系，所以直接定义成未知类型即可。
+
+​    第二个参数是生成这个功能号的核心数字，这个数字直接用来和其他参数“合成”功能号。0x0~0x7ff 已经被微软预留，所以只能使用0x7ff~0xfff。如果要定义超过一个的功能号，那么不同的功能号就靠这个数字进行区分。
+
+​    第三个参数 METHOD_BUFFERED 是说用缓冲方式。用缓冲方式的话，输入/输出缓冲会在用户和内核之间拷贝。这是比较简单和安全的一种方式。
+
+​    最后一个参数是这个操作需要的权限。当需要将数据发送到设备时，相当于往设备上写入数据，所以标志位拥有写数据权限
+
+​    定义的另一个从内核接收刺符传的功能号如下
+
+```c
+#define CWK_DVC_RECV_STR (ULONG)CTL_CODE(FILE_DEVICE_UNKNOWN, 0x912, METHOD_BUFFERED, FILE_READ_DATA)
+```
+
+​    下面就是发送请求的过程，除了之前的打开设备和关闭设备之外，中间增加了使用 DeviceIoControl 发送请求的过程
+
+```c
+int main()
+{
+    ///...
+    char *msg = {"Hello driver, this is a message from app.\r\n"};
+    ///...
+    if(!DeviceIoControl(device, CWK_DVC_SEND_STR, msg, strlen(msg) + 1, NULL, 0, &ret_len, 0))
+    {
+        printf("Send message failed.\r\n");
+        return -2;
+    }
+    else
+        printf("Send message successfully.\r\n");
+}
+```
+
+## DeviceIoControl Handle
+
+​    目前应用中调用 DeviceIoControl 一定会返回错误，因为内核驱动中还没处理。现在回到内核中来修改。在处理设备控制请求时，有如下任务要完成。
+
+- 获得功能号
+- 如果有输入缓冲区，则必须获得输入缓冲区的指针以及长度
+- 如果有输出缓冲区，则必须获得输出缓冲区的指针以及长度
+
+​    这些任务可以用下面的代码来完成
+
+```c
+//...
+if(irpsp->MajorFunction == IRP_MJ_DEVICE_CONTROL)
+{
+    PVOID buffer = irp->AssociatedIrp.SystemBuffer;//获得缓冲区
+    ULONG inlen = irpsp->Parameters.DeviceIoControl.InputBufferLength;//获得输入缓冲区的长度
+    ULONG outlen = irpsp->Parameters.DeviceIoControl.OutputBufferLength;//获得输出缓冲区的长度
+
+//...
+```
+
+​    注意，缓冲区是 irp->AssociatedIrp.SystemBuffer 的前提是，这是一个缓冲方式的设备控制请求。这里只说缓冲区，没有说是输入缓冲区还是输出缓冲区，是因为在设备控制请求中，输入缓冲区和输出缓冲区是共享的，是同一个指针。
+
+​    下面是完整的分发函数。
+
+```c
+NTSTATUS cwkDispatch(IN PDEVICE_OBJECT dev, IN PIRP irp)
+{
+    PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(irp);
+    NTSTATUS status = STATUS_SUCCESS;
+    ULONG ret_len = 0;
+    if(dev == g_cdo)
+    {
+        if(irpsp->MajorFunction == IRP_MJ_CREATE || irpsp->MajorFunction == IRP_MJ_CLOSE)
+        {
+            ;//生成和关闭请求
+        }
+        else if(irpsp->MajorFunction == IRP_MJ_DEVICE_CONTROL)
+        {
+            PVOID buffer = irp->AssociatedIrp.SystemBuffer;
+            ULONG inlen = irpsp->Parameters.DeviceIoControl.InputBufferLength;
+            ULONG outlen = irpsp->Parameters.DeviceIoControl.OutputBufferLength;
+            switch(irpsp->Parameters.DeviceIoControl.IoControlCode)
+            {
+                case CWK_DVC_SEND_STR:
+                    ASSERT(buffer != NULL);
+                    ASSERT(inlen > 0);
+                    ASSERT(outlen == 0);
+                    DbgPrint((char*)buffer);
+                    break;
+                case CWK_DVC_RECV_STR:
+                default:
+                    status = STATUS_INVALID_PARAMETER;
+                    break;
+            }
+        }
+    }
+    irp->IoStatus.Information = ret_len;
+    irp->IoStatus.Status = status;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
+    return status;
+}
+```
+
+​    这样的处理方式有一个缺点，就是没有规定缓冲区的最大长度，这可能发生缓冲区溢出漏洞被利用，使得直接从用户态获得内核态权限。因此 ，应该严格设计通信接口，避免缓冲区溢出的可能

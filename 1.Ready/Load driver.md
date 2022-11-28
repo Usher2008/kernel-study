@@ -18,6 +18,10 @@ dbgView需要在注册表中配置内容才能显示KdPrint的输出，
 
 "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\windbg.exe" -b -k com:pipe,port=\\.\pipe\com_1,resets=0
 
+### 虚拟机安装串口
+
+![image-20221128154411984](C:\Users\usher\Desktop\kernal-study\1.Ready\image-20221128154411984.png)
+
 
 
 ### 调试引导(boot debugger)
